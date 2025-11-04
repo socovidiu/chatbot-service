@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         """
         provider = self.LANGCHAIN_PROVIDER.lower()
 
-        if provider == "openai" and not self.AZURE_OPENAI:
+        if provider == "openai":
             # OpenAI
             try:
                 from langchain_openai import ChatOpenAI
