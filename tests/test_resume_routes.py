@@ -1,11 +1,3 @@
-import pytest
-from fastapi.testclient import TestClient
-from resume_chatbot_api.app import app
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
 def test_resume_analyze(client, monkeypatch):
     from resume_chatbot_api.api import resume as resume_api
     async def mock_analyze(profile):

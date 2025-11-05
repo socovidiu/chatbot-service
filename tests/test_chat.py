@@ -1,17 +1,14 @@
-# tests/test_chat.py
-import pytest
-from fastapi.testclient import TestClient
 
-# Adjust the import depending on your structure.
-# If your app is in src/resume_chatbot_api/app.py, this works:
-from resume_chatbot_api.app import app
+def test_rejects_missing_key(client):
+    respomse = client.get("/")
+    assert respomse.status_code in (401, 403)
 
-@pytest.fixture
-def client():
-    return TestClient(app)
+def test_accepts_valid_key(client, valid_api_key, api_key_header_name):
+    response = client.get("/", headers={api_key_header_name: valid_api_key})
+    assert response.status_code == 200
+    assert response.json().get("ok") is True
 
-
-def test_chat_response(client, monkeypatch):
+def test_chat_response(client,monkeypatch):
     """Test that /chat returns a suggestion field."""
     
     # Mock the LLMOperator.generate to avoid real API calls
