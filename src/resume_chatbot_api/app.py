@@ -1,8 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from api import chat, resume
-from core.config import settings
+from security.security import require_api_key
 
-app = FastAPI(title="Resume Chatbot API", description="API for generating resume suggestions using a chatbot.", version="1.0")
+app = FastAPI(
+    title="Resume Chatbot API", 
+    description="API for generating resume suggestions using a chatbot.", 
+    version="1.0",
+    # Require API key for *every* endpoint (including /)
+    dependencies=[Depends(require_api_key)],
+    )
 
 app.include_router(chat.router, prefix="/chat", tags=["chat"])
 app.include_router(resume.router)
