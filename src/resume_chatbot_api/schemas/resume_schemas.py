@@ -13,8 +13,8 @@ These models are used in conjunction with the
 :class:`services.llm_operator.LLMOperator` class.
 """
 
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import List, Optional, Dict
 
 
 # ----------------------------------------------------------------------
@@ -42,10 +42,7 @@ class ExperienceItem(BaseModel):
     role: str = Field(..., description="Job title or position held.")
     start: Optional[str] = Field(None, description="Start date or year of the role.")
     end: Optional[str] = Field(None, description="End date or year of the role.")
-    bullets: List[str] = Field(
-        default_factory=list,
-        description="List of key responsibilities or achievements.",
-    )
+    bullets: List[str] = Field(default_factory=list, description="Key bullets.")
 
 
 class EducationItem(BaseModel):
@@ -94,15 +91,9 @@ class CanonicalProfile(BaseModel):
     name: Optional[str] = Field(None, description="Candidate's name.")
     title: Optional[str] = Field(None, description="Professional or role title.")
     summary: Optional[str] = Field(None, description="Brief professional summary.")
-    skills: List[str] = Field(
-        default_factory=list, description="List of skills or competencies."
-    )
-    experience: List[ExperienceItem] = Field(
-        default_factory=list, description="List of experience items."
-    )
-    education: List[EducationItem] = Field(
-        default_factory=list, description="List of education items."
-    )
+    skills: List[str] = Field(default_factory=list, description="List of skills or competencies.")
+    experience: List[ExperienceItem] = Field(default_factory=list, description="List of experience items.")
+    education: List[EducationItem] = Field(default_factory=list, description="List of education items.")
 
 
 # ----------------------------------------------------------------------
@@ -118,9 +109,8 @@ class AnalyzeRequest(BaseModel):
         Raw resume text or structured JSON profile.
     """
 
-    profile: str | Dict[str, Any] = Field(
-        ..., description="Raw text or structured JSON resume data."
-    )
+    model_config = ConfigDict(extra="forbid")
+    canonical: CanonicalProfile
 
 
 class AnalyzeResponse(BaseModel):
@@ -132,10 +122,22 @@ class AnalyzeResponse(BaseModel):
     canonical : CanonicalProfile
         Canonicalized profile structure derived from the input.
     """
+    model_config = ConfigDict(extra="allow")
 
-    canonical: CanonicalProfile = Field(
-        ..., description="Canonicalized resume profile."
+    quality: int = Field(0, ge=0, le=100, description="Overall resume quality score (0–100).")
+    strengths: List[str] = Field(default_factory=list, description="What is working well.")
+    gaps: List[str] = Field(default_factory=list, description="Missing skills/sections/content.")
+    risks: List[str] = Field(default_factory=list, description="Potential red flags (date gaps, job-hopping, etc.).")
+    recommendations: List[str] = Field(default_factory=list, description="Concrete, actionable improvements.")
+    section_scores: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-section scores 0–5, e.g. {'summary':4,'experience':3,'education':5,'skills':4}",
     )
+    keyword_clusters: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="Clustered keywords, e.g. {'core':[],'tools':[],'soft':[]}",
+    )
+    anomalies: List[str] = Field(default_factory=list, description="Parsing/timeline anomalies to check.")
 
 
 # ----------------------------------------------------------------------
@@ -150,7 +152,7 @@ class JDRequest(BaseModel):
     job_description : str
         The raw job description text.
     """
-
+    model_config = ConfigDict(extra="forbid")
     job_description: str = Field(..., description="Text of the job description.")
 
 
@@ -170,14 +172,12 @@ class KeywordsResponse(BaseModel):
         Optional or secondary skills mentioned in the posting.
     """
 
-    skills: List[str] = Field(..., description="List of core technical skills.")
-    keywords: List[str] = Field(..., description="List of general keywords extracted.")
-    seniority: Optional[str] = Field(
-        None, description="Seniority level inferred from the description."
-    )
-    nice_to_have: List[str] = Field(
-        default_factory=list, description="List of optional or nice-to-have skills."
-    )
+    model_config = ConfigDict(extra="allow")
+
+    skills: List[str] = Field(default_factory=list, description="List of core technical skills.")
+    keywords: List[str] = Field(default_factory=list, description="List of general keywords extracted.")
+    seniority: Optional[str] = Field(None, description="Seniority level inferred from the description.")
+    nice_to_have: List[str] = Field(default_factory=list, description="Optional or nice-to-have skills.")
 
 
 # ----------------------------------------------------------------------
@@ -197,13 +197,11 @@ class TailorRequest(BaseModel):
         Desired tone for suggestions (default: 'concise').
     """
 
-    profile: CanonicalProfile | Dict[str, Any] = Field(
-        ..., description="Canonical or raw profile data."
-    )
+    model_config = ConfigDict(extra="forbid")
+
+    profile: CanonicalProfile = Field(..., description="Canonical profile data.")
     job_description: str = Field(..., description="Target job description text.")
-    tone: Optional[str] = Field(
-        "concise", description="Desired tone for tailored suggestions."
-    )
+    tone: Optional[str] = Field("concise", description="Desired tone for tailored suggestions.")
 
 
 class TailorResponse(BaseModel):
@@ -220,10 +218,10 @@ class TailorResponse(BaseModel):
         Key focus areas recommended for improvement.
     """
 
-    bullets: List[str] = Field(..., description="Tailored bullet points.")
-    removed: List[str] = Field(
-        default_factory=list, description="Removed or less relevant bullets."
-    )
+    model_config = ConfigDict(extra="allow")
+
+    bullets: List[str] = Field(default_factory=list, description="Tailored bullet points.")
+    removed: List[str] = Field(default_factory=list, description="Removed or less relevant bullets.")
     focus: List[str] = Field(default_factory=list, description="Suggested focus areas.")
 
 
@@ -239,12 +237,10 @@ class SummaryRequest(BaseModel):
         Target job description for contextualization.
     """
 
-    profile: CanonicalProfile | Dict[str, Any] = Field(
-        ..., description="Canonical or raw profile data."
-    )
-    job_description: Optional[str] = Field(
-        None, description="Optional target job description."
-    )
+    model_config = ConfigDict(extra="forbid")
+
+    profile: CanonicalProfile = Field(..., description="Canonical profile data.")
+    job_description: Optional[str] = Field(None, description="Optional target job description.")
 
 
 class SummaryResponse(BaseModel):
@@ -257,7 +253,9 @@ class SummaryResponse(BaseModel):
         The AI-generated resume summary text.
     """
 
-    summary: str = Field(..., description="Generated professional summary.")
+    model_config = ConfigDict(extra="allow")
+
+    summary: str = Field("", description="Generated professional summary.")
 
 
 # ----------------------------------------------------------------------
@@ -279,9 +277,9 @@ class CoverLetterRequest(BaseModel):
         Target role or job title.
     """
 
-    profile: CanonicalProfile | Dict[str, Any] = Field(
-        ..., description="Profile data (canonical or raw)."
-    )
+    model_config = ConfigDict(extra="forbid")
+
+    profile: CanonicalProfile = Field(..., description="Canonical profile data.")
     job_description: str = Field(..., description="Job description text.")
     company: Optional[str] = Field(None, description="Target company name.")
     role: Optional[str] = Field(None, description="Target role or title.")
@@ -297,8 +295,9 @@ class CoverLetterResponse(BaseModel):
         The AI-generated cover letter text.
     """
 
-    cover_letter: str = Field(..., description="Generated cover letter text.")
+    model_config = ConfigDict(extra="allow")
 
+    cover_letter: str = Field("", description="Generated cover letter text.")
 
 # ----------------------------------------------------------------------
 # ATS Scoring
@@ -314,9 +313,17 @@ class ATSScoreRequest(BaseModel):
     job_description : str
         Target job description for comparison.
     """
+    model_config = ConfigDict(extra="forbid")
 
-    resume_text: str = Field(..., description="Raw resume text.")
+    resume_text: Optional[str] = Field(None, description="Raw resume text.")
+    canonical: Optional[CanonicalProfile] = Field(None, description="Canonical profile.")
     job_description: str = Field(..., description="Target job description text.")
+
+    @model_validator(mode="after")
+    def _require_one(self):
+        if not (self.resume_text or self.canonical):
+            raise ValueError("Provide 'resume_text' or 'canonical'.")
+        return self
 
 
 class ATSScoreResponse(BaseModel):
@@ -335,9 +342,9 @@ class ATSScoreResponse(BaseModel):
         Mapping of matched and unmatched keywords by category.
     """
 
-    score: int = Field(..., description="ATS score between 0 and 100.")
-    gaps: List[str] = Field(..., description="List of missing or weak skills/sections.")
-    recommendations: List[str] = Field(..., description="Improvement recommendations.")
-    keyword_match: Dict[str, List[str]] = Field(
-        ..., description="Matched/unmatched keyword mapping."
-    )
+    model_config = ConfigDict(extra="allow")
+
+    score: int = Field(0, description="ATS score between 0 and 100.")
+    gaps: List[str] = Field(default_factory=list, description="Missing or weak skills/sections.")
+    recommendations: List[str] = Field(default_factory=list, description="Improvement recommendations.")
+    keyword_match: Dict[str, List[str]] = Field(default_factory=dict, description="Matched/unmatched keyword mapping.")

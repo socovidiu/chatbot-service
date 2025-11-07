@@ -42,7 +42,7 @@ llm = LLMOperator(settings.create_chat_llm())
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(req: AnalyzeRequest):
+async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     """
     Analyze and canonicalize a user's resume profile.
 
@@ -66,15 +66,19 @@ async def analyze(req: AnalyzeRequest):
         500 if the LLM processing fails.
     """
     try:
-        data = await llm.analyze_profile(req.profile)
-        canonical = CanonicalProfile(**data)
-        return AnalyzeResponse(canonical=canonical)
+        # If your operator expects a dict, send a dict:
+        payload = req.canonical.model_dump()
+        data: dict = await llm.analyze_profile(payload)  
+        if "canonical" in data and isinstance(data["canonical"], dict):
+            data = data["canonical"]
+        return AnalyzeResponse(**data)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=f"analyze failed: {e}")
+
 
 
 @router.post("/keywords", response_model=KeywordsResponse)
-async def keywords(req: JDRequest):
+async def keywords(req: JDRequest) -> KeywordsResponse:
     """
     Extract important keywords from a job description.
 
@@ -100,7 +104,7 @@ async def keywords(req: JDRequest):
 
 
 @router.post("/tailor", response_model=TailorResponse)
-async def tailor(req: TailorRequest):
+async def tailor(req: TailorRequest) -> TailorResponse:
     """
     Tailor resume bullet points to a specific job description.
 
@@ -130,7 +134,7 @@ async def tailor(req: TailorRequest):
 
 
 @router.post("/summary", response_model=SummaryResponse)
-async def summary(req: SummaryRequest):
+async def summary(req: SummaryRequest) -> SummaryResponse:
     """
     Generate a professional summary for a resume.
 
@@ -158,7 +162,7 @@ async def summary(req: SummaryRequest):
 
 
 @router.post("/cover-letter", response_model=CoverLetterResponse)
-async def cover_letter(req: CoverLetterRequest):
+async def cover_letter(req: CoverLetterRequest) -> CoverLetterResponse:
     """
     Generate a tailored cover letter.
 
@@ -188,7 +192,7 @@ async def cover_letter(req: CoverLetterRequest):
 
 
 @router.post("/ats-score", response_model=ATSScoreResponse)
-async def ats(req: ATSScoreRequest):
+async def ats(req: ATSScoreRequest) -> ATSScoreResponse:
     """
     Compute an ATS (Applicant Tracking System) compatibility score.
 
@@ -206,7 +210,12 @@ async def ats(req: ATSScoreRequest):
         Contains the computed ATS score, key insights, and suggestions.
     """
     try:
-        data = await llm.ats_score(req.resume_text, req.job_description)
+        if req.resume_text:
+            data = await llm.ats_score(req.resume_text, req.job_description)
+        else:
+            # Derive a text view if your operator wants text, or pass canonical if it supports it
+            profile_dict = req.canonical.model_dump()
+            data = await llm.ats_score_from_canonical(profile_dict, req.job_description)
         return ATSScoreResponse(**data)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=f"ats-score failed: {e}")

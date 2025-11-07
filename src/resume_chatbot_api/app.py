@@ -1,20 +1,82 @@
-from fastapi import FastAPI, Depends
+"""
+Application Entry Point
+=======================
+
+This module initializes the FastAPI application for the **Resume Chatbot API**.
+
+It wires together all API routers (chat, resume, etc.) and configures the
+main metadata used in both Sphinx-generated documentation and the FastAPI
+OpenAPI schema (Swagger UI).
+
+Modules
+-------
+- :mod:`api.chat` — Chat endpoints for AI-assisted resume suggestions.
+- :mod:`api.resume` — Resume analysis, tailoring, and keyword extraction endpoints.
+- :mod:`core.config` — Environment-based configuration and provider setup.
+
+Usage
+-----
+You can run this app directly using:
+
+.. code-block:: bash
+
+    uv run uvicorn app:app --reload
+
+The OpenAPI/Swagger UI is available at:
+    http://localhost:8000/docs
+"""
+
+from fastapi import FastAPI
 from api import chat, resume
-from security.security import require_api_key
+from core.config import settings
 
+# ----------------------------------------------------------------------
+# FastAPI Application Initialization
+# ----------------------------------------------------------------------
 app = FastAPI(
-    title="Resume Chatbot API", 
-    description="API for generating resume suggestions using a chatbot.", 
-    version="1.0",
-    # Require API key for *every* endpoint (including /)
-    dependencies=[Depends(require_api_key)],
-    )
+    title=settings.API_TITLE,
+    description=settings.API_DESCRIPTION,
+    version=settings.API_VERSION,
+)
 
+
+# ----------------------------------------------------------------------
+# Router Registration
+# ----------------------------------------------------------------------
 app.include_router(chat.router, prefix="/chat", tags=["chat"])
-app.include_router(resume.router)
+app.include_router(resume.router, tags=["resume"])
 
-@app.get("/")
+
+# ----------------------------------------------------------------------
+# Root Endpoint
+# ----------------------------------------------------------------------
+@app.get("/", tags=["root"])
 def read_root():
-    return {"message": "Welcome to the Resume Chatbot API. Use the /chat endpoint to interact with the chatbot."}
+    """
+    Root endpoint for health check and basic information.
 
+    Returns
+    -------
+    dict
+        A simple JSON message confirming that the API is running.
+
+    Example
+    -------
+    >>> GET /
+    {
+        "message": "Welcome to the Resume Chatbot API. Use the /chat endpoint to interact with the chatbot."
+    }
+    """
+    return {
+        "message": (
+            "Welcome to the Resume Chatbot API. "
+            "Use the /chat endpoint to interact with the chatbot."
+        )
+    }
+
+
+# Export the app for ASGI servers (e.g., uvicorn, hypercorn)
 export_app = app
+"""
+Alias for the FastAPI application object, to comply with ASGI export conventions.
+"""

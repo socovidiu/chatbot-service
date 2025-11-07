@@ -68,9 +68,7 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
     try:
-        text = await llm.generate(request)
-        return ChatResponse(
-            original=request, suggestion=ResumeSuggestion(raw_text=text)
-        )
+        text = await llm.chat(prompt=request.message, profile=request.profile)
+        return ChatResponse(original=request, suggestion=ResumeSuggestion(raw_text=text))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

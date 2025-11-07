@@ -63,36 +63,36 @@ def analyze_profile(profile: Union[str, Dict[str, Any]]) -> SystemUserSchema:
         Instructional system prompt, user prompt with embedded data,
         and a short schema hint identifier.
     """
-    system = "You are a resume structuring assistant."
+    schema = "quality/strengths/gaps/risks/recommendations/section_scores/keyword_clusters/anomalies"
+    system = "You are a resume analyst for software/tech resumes."
     user = f"""
-Input profile (may be free text or JSON):
-{_dump(profile)}
+            Canonical profile (JSON):
+            {_dump(profile)}
 
-Normalize into this shape:
-{{
-  "name": null | string,
-  "title": null | string,
-  "summary": null | string,
-  "skills": [string, ...],
-  "experience": [
-    {{
-      "company": string,
-      "role": string,
-      "start": null | string,
-      "end": null | string,
-      "bullets": [string, ...]
-    }}
-  ],
-  "education": [
-    {{
-      "school": string,
-      "degree": null | string,
-      "year": null | string
-    }}
-  ]
-}}
-""".strip()
-    return system, user, "CanonicalProfile"
+            Return a JSON object EXACTLY in this shape:
+            {{
+            "quality": 0,
+            "strengths": [],
+            "gaps": [],
+            "risks": [],
+            "recommendations": [],
+            "section_scores": {{"summary": 0, "experience": 0, "education": 0, "skills": 0}},
+            "keyword_clusters": {{"core": [], "tools": [], "soft": []}},
+            "anomalies": []
+            }}
+            Rules:
+            - DO NOT return empty lists unless truly none exist. If something is unclear, infer from the profile.
+            - "quality": 0–100. Start at 50, add up to +25 for strong experience, +15 for quantified impact, +10 for breadth (tools/cloud), subtract for missing sections.
+            - "strengths": at least 2 concrete strengths.
+            - "gaps": at least 2 concrete gaps (e.g., “no metrics”, “missing cloud certs”).
+            - "risks": mention timeline issues (date gaps, frequent short roles) if any; otherwise [].
+            - "recommendations": 3–5 actionable next steps.
+            - "section_scores": integers 0–5 for summary/experience/education/skills.
+            - "keyword_clusters": split skills into core (languages/primary stacks), tools (DevOps, cloud, frameworks), soft (communication/leadership).
+            - "anomalies": inconsistent dates, overlapping roles, etc.
+            Return ONLY the JSON object.
+            """.strip()
+    return system, user, schema
 
 
 def extract_keywords(jd: str) -> SystemUserSchema:
@@ -111,17 +111,17 @@ def extract_keywords(jd: str) -> SystemUserSchema:
     """
     system = "You extract skills and hiring signals from job descriptions."
     user = f"""
-Job description:
-{jd}
+            Job description:
+            {jd}
 
-Return:
-{{
-  "skills": [string, ...],
-  "keywords": [string, ...],
-  "seniority": "junior|mid|senior|lead|principal|null",
-  "nice_to_have": [string, ...]
-}}
-""".strip()
+            Return a JSON object exactly like this shape (values are examples):
+            {{
+            "skills": [],
+            "keywords": [],
+            "seniority": null,
+            "nice_to_have": []
+            }}
+            """.strip()
     return system, user, "skills/keywords/seniority"
 
 
@@ -145,21 +145,22 @@ def tailor_bullets(profile: Dict[str, Any], jd: str, tone: str) -> SystemUserSch
     """
     system = "You write quantified, impact-focused resume bullets aligned to a job."
     user = f"""
-Profile:
-{_dump(profile)}
+            Profile:
+            {_dump(profile)}
 
-Job description:
-{jd}
+            Job description:
+            {jd}
 
-Tone: {tone}
+            Tone: {tone}
 
-Return:
-{{
-  "bullets": [string, ...],   // 4-6 bullets, STAR-style, quantified where possible
-  "removed": [string, ...],   // skills/experiences not aligned to JD
-  "focus": [string, ...]      // top 3-5 keywords to emphasize
-}}
-""".strip()
+            Return a JSON object with this shape:
+            {{
+            "bullets": [],
+            "removed": [],
+            "focus": []
+            }}
+            """.strip()
+
     return system, user, "bullets/removed/focus"
 
 
@@ -181,14 +182,16 @@ def write_summary(profile: Dict[str, Any], jd: Optional[str]) -> SystemUserSchem
     """
     system = "You write crisp professional summaries (2-3 lines)."
     user = f"""
-Profile:
-{_dump(profile)}
+            Profile:
+            {_dump(profile)}
 
-Job description (optional):
-{jd or ""}
+            Job description (optional):
+            {jd or ""}
 
-Return: {{ "summary": string }}
-""".strip()
+            Return a JSON object:
+            {{ "summary": "" }}
+            """.strip()
+
     return system, user, '{"summary": string}'
 
 
@@ -216,17 +219,19 @@ def write_cover_letter(
     """
     system = "You draft short, specific cover letters (≤180 words)."
     user = f"""
-Profile:
-{_dump(profile)}
+            Profile:
+            {_dump(profile)}
 
-Job description:
-{jd}
+            Job description:
+            {jd}
 
-Company: {company or "Unknown"}
-Role: {role or "Unknown"}
+            Company: {company or "Unknown"}
+            Role: {role or "Unknown"}
 
-Return: {{ "cover_letter": string }}
-""".strip()
+            Return a JSON object:
+            {{ "cover_letter": "" }}
+            """.strip()
+
     return system, user, '{"cover_letter": string}'
 
 
@@ -248,21 +253,22 @@ def ats_score(resume_text: str, jd: str) -> SystemUserSchema:
     """
     system = "You are an ATS heuristic evaluator."
     user = f"""
-Resume:
-{resume_text}
+            Resume:
+            {resume_text}
 
-Job description:
-{jd}
+            Job description:
+            {jd}
 
-Return:
-{{
-  "score": int,                  // 0-100
-  "gaps": [string, ...],
-  "recommendations": [string, ...],
-  "keyword_match": {{
-    "present": [string, ...],
-    "missing": [string, ...]
-  }}
-}}
-""".strip()
+            Return a JSON object with this shape:
+            {{
+            "score": 0,
+            "gaps": [],
+            "recommendations": [],
+            "keyword_match": {{
+                "present": [],
+                "missing": []
+            }}
+            }}
+            """.strip()
+
     return system, user, "score/gaps/recommendations/keyword_match"

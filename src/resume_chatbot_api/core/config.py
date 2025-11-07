@@ -26,8 +26,8 @@ configuration access.
 
 import os
 from typing import Optional, List, Literal
-from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ----------------------------------------------------------------------
 # Type aliases and constants
@@ -73,20 +73,26 @@ class Settings(BaseSettings):
         Whitelisted hosts for CORS and network configuration.
     """
 
-    # Generic LLM configuration
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",          # <- prevents “Extra inputs are not permitted”
+    )
+
+    # --- LLM config ---
     LANGCHAIN_PROVIDER: Provider = Field("openai", env="LANGCHAIN_PROVIDER")
     MODEL: str = Field("gpt-4o-mini", env="LLM_MODEL")
     TEMPERATURE: float = Field(0.0, env="LLM_TEMPERATURE")
     MAX_TOKENS: Optional[int] = Field(None, env="LLM_MAX_TOKENS")
 
-    # OpenAI / Azure OpenAI
+    # OpenAI
     OPENAI_API_KEY: Optional[str] = Field(None, env=("LLM_API_KEY", "OPENAI_API_KEY"))
 
-    # Ollama (local)
+    # Ollama
     OLLAMA_MODEL: str = Field("llama3.2", env="OLLAMA_MODEL")
     OLLAMA_BASE_URL: str = Field("http://localhost:11434", env="OLLAMA_BASE_URL")
 
-    # App configuration
+    # --- App config ---
     API_VERSION: str = Field("v1", env="API_VERSION")
     API_TITLE: str = Field("Resume Chatbot API", env="API_TITLE")
     API_DESCRIPTION: str = Field(
@@ -96,16 +102,17 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(False, env="DEBUG")
     ALLOWED_HOSTS: List[str] = Field(["*"], env="ALLOWED_HOSTS")
 
-    # API Key authentication for LLM access
-    API_KEY_HEADER: str = Field("X-API-Key", env=("LLM_API_KEY_HEADER",))
-    API_KEYS: List[str] = Field(default_factory=list, env=("LLM_API_KEYS",))
+    # API key header + keys for your own service
+    API_KEY_HEADER: str = Field("X-API-Key", env="LLM_API_KEY_HEADER")
+    API_KEYS: List[str] = Field(default_factory=list, env="LLM_API_KEYS")
 
-    class Config:
-        """Pydantic settings configuration."""
-
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
+    # Parse CSV strings (".env": LLM_API_KEYS=a,b,c) into lists
+    @field_validator("ALLOWED_HOSTS", "API_KEYS", mode="before")
+    @classmethod
+    def _split_csv(cls, v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return v
     # ----------------------------------------------------------------------
     # LLM factory
     # ----------------------------------------------------------------------
@@ -156,6 +163,7 @@ class Settings(BaseSettings):
             return ChatOpenAI(
                 model=self.MODEL,
                 temperature=self.TEMPERATURE,
+                model_kwargs={"response_format": {"type": "json_object"}},
                 max_tokens=self.MAX_TOKENS,
             )
 
@@ -171,6 +179,7 @@ class Settings(BaseSettings):
                 base_url=self.OLLAMA_BASE_URL,
                 model=self.OLLAMA_MODEL,
                 temperature=self.TEMPERATURE,
+                model_kwargs={"format": "json"},
             )
 
         raise ValueError(f"Unsupported LANGCHAIN_PROVIDER: {provider}")

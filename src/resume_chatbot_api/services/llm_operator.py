@@ -113,13 +113,27 @@ class LLMOperator:
             guard += f"\nJSON schema (shape): {schema_hint}"
 
         raw = await self._ainvoke_text(system, user + guard)
+        # Fast path
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            m = re.search(r"\{.*\}|\[.*\]", raw, re.S)
-            if not m:
-                raise ValueError(f"Model did not return JSON: {raw[:300]}")
-            return json.loads(m.group(0))
+            pass
+
+        # Handle ```json ... ``` fenced blocks (some models still add them)
+        fenced = re.search(r"```json\s*(\{.*?\}|\[.*?\])\s*```", raw, re.S | re.I)
+        if fenced:
+            return json.loads(fenced.group(1))
+
+        # Extract first JSON-looking top-level object/array (non-greedy)
+        m = re.search(r"(\{.*\}|\[.*\])", raw, re.S)
+        if m:
+            try:
+                return json.loads(m.group(1))
+            except json.JSONDecodeError as e:
+                raise ValueError(f"JSON fragment invalid: {e}; fragment starts: {m.group(1)[:200]}")
+
+        # Nothing JSON-like
+        raise ValueError(f"Model did not return JSON. First 200 chars: {raw[:200]}")
 
     # ----------------------------------------------------------------------
     # Public task methods
@@ -141,7 +155,7 @@ class LLMOperator:
         Returns
         -------
         dict
-            Canonicalized profile as a JSON-compatible dictionary.
+            Analysis result of the profile as a JSON-compatible dictionary.
         """
         system, user, schema = pb.analyze_profile(profile)
         return await self._invoke_json(system, user, schema)
@@ -254,3 +268,28 @@ class LLMOperator:
         """
         system, user, schema = pb.ats_score(resume_text, jd)
         return await self._invoke_json(system, user, schema)
+
+    # --- NEW: simple freeform chat entrypoint ------------------------------
+    async def chat(
+        self,
+        prompt: str,
+        profile: Optional[Union[str, Dict[str, Any]]] = None,
+        system: Optional[str] = None,
+    ) -> str:
+        """
+        Lightweight chat method for ad-hoc prompts (used by /chat).
+        If a profile is provided, it’s injected as context.
+        """
+        ctx = ""
+        if isinstance(profile, dict):
+            import json as _json
+            ctx = f"\n\nUser profile (JSON):\n{_json.dumps(profile, ensure_ascii=False)}"
+        elif isinstance(profile, str) and profile.strip():
+            ctx = f"\n\nUser profile (text):\n{profile.strip()}"
+
+        system = system or (
+            "You are a resume-writing assistant. Be concise and helpful. "
+            "Return plain text; no markdown, no code fences."
+        )
+        user = f"{prompt.strip()}{ctx}"
+        return await self._ainvoke_text(system, user)
