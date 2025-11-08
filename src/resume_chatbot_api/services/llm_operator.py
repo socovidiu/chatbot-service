@@ -17,12 +17,11 @@ and enforces a consistent JSON-based output schema.
 """
 
 from __future__ import annotations
-from typing import Any, Dict, Optional, Union
-import json
-import re
-
-from langchain_core.messages import SystemMessage, HumanMessage
-from . import prompt_builders as pb
+from typing import Any, List, Callable, Type
+from langchain.agents import create_agent
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.chat_models import init_chat_model
+from core.config import settings
 
 
 class LLMOperator:
@@ -30,266 +29,68 @@ class LLMOperator:
     A unified asynchronous interface for executing resume-related tasks
     using a LangChain-compatible chat model.
 
-    Parameters
-    ----------
-    chat_llm : Any
-        A LangChain chat model instance, such as
-        :class:`langchain_openai.ChatOpenAI` or
-        :class:`langchain_ollama.ChatOllama`.
+    """       
+    def __init__(self):
+        self.model = self._init_chat_model()
 
-    Example
-    -------
-    >>> from core.config import settings
-    >>> from services.llm_operator import LLMOperator
-    >>> llm = LLMOperator(settings.create_chat_llm())
-    >>> result = await llm.extract_keywords("Job description text here")
-    """
+    def _init_chat_model(self):
+        # Common kwargs
+        common = {}
+        if settings.llm_temperature is not None:
+            common["temperature"] = settings.llm_temperature
+        if settings.llm_max_tokens is not None:
+            common["max_tokens"] = settings.llm_max_tokens
 
-    def __init__(self, chat_llm: Any):
-        self.llm = chat_llm
+        if settings.langchain_provider == "openai":
+            # Requires: pip install -U langchain langchain-openai
+            # api_key can also come from env; passing is fine too
+            return init_chat_model(
+                settings.openai_model,
+                model_provider="openai",
+                api_key=settings.openai_api_key,
+                **common,
+            )
+        else:  # ollama
+            # Requires: pip install -U langchain langchain-ollama
+            return init_chat_model(
+                settings.ollama_model,
+                model_provider="ollama",
+                base_url=settings.ollama_base_url,
+                **common,
+            )
 
-    # ----------------------------------------------------------------------
-    # Internal helpers
-    # ----------------------------------------------------------------------
-    async def _ainvoke_text(self, system: str, user: str) -> str:
+        
+    # ---------- Chains (no tools, no memory, no recursion risk) ----------
+    def create_chain(self, system_prompt: str, schema: Type[Any]):
         """
-        Invoke the LLM asynchronously and return raw text content.
-
-        Parameters
-        ----------
-        system : str
-            System prompt defining the LLM's role and context.
-        user : str
-            User input prompt.
-
-        Returns
-        -------
-        str
-            The raw textual output of the LLM.
+        Returns a Runnable chain: { 'user': <text> } -> Pydantic output.
+        Prefer this for endpoints that don't need tools.
         """
-        msgs = [
-            SystemMessage(content=system.strip()),
-            HumanMessage(content=user.strip()),
-        ]
-        resp = await self.llm.ainvoke(msgs)
-        return getattr(resp, "content", str(resp))
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("user", "{user}"),
+        ])
 
-    async def _invoke_json(
-        self,
-        system: str,
-        user: str,
-        schema_hint: Optional[str],
-    ) -> Dict[str, Any]:
+        # Newer LangChain builds: model.with_structured_output(...)
+        with_structured = getattr(self.model, "with_structured_output", None)
+        if callable(with_structured):
+            structured_model = self.model.with_structured_output(schema)
+            return prompt | structured_model
+
+        # Fallback: some builds accept response_format on the model
+        return prompt | self.model.bind(response_format=schema)
+
+    # ---------- Agents (only when you need tools) ----------
+    def create_agent(self, tools: List[Callable], system_prompt: str, schema: Type[Any]):
         """
-        Invoke the LLM expecting a valid JSON response.
-
-        This method enforces strict JSON output by appending a
-        schema hint and parsing the model's response accordingly.
-
-        Parameters
-        ----------
-        system : str
-            System prompt defining task context and role.
-        user : str
-            User query prompt.
-        schema_hint : Optional[str]
-            Optional JSON schema hint to guide the model output.
-
-        Returns
-        -------
-        dict
-            Parsed JSON data returned by the LLM.
-
-        Raises
-        ------
-        ValueError
-            If the model fails to return valid JSON.
+        Returns an Agent (plan/act). Use only if you really need tools.
         """
-        guard = (
-            "\n\nReturn ONLY valid JSON that matches the schema. "
-            "No backticks, no markdown, no extra commentary."
+        agent = create_agent(
+            model=self.model,
+            tools=tools,
+            system_prompt=system_prompt,
+            response_format=schema,   # structured output without .with_structured_output
         )
-        if schema_hint:
-            guard += f"\nJSON schema (shape): {schema_hint}"
+        return agent
 
-        raw = await self._ainvoke_text(system, user + guard)
-        # Fast path
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            pass
-
-        # Handle ```json ... ``` fenced blocks (some models still add them)
-        fenced = re.search(r"```json\s*(\{.*?\}|\[.*?\])\s*```", raw, re.S | re.I)
-        if fenced:
-            return json.loads(fenced.group(1))
-
-        # Extract first JSON-looking top-level object/array (non-greedy)
-        m = re.search(r"(\{.*\}|\[.*\])", raw, re.S)
-        if m:
-            try:
-                return json.loads(m.group(1))
-            except json.JSONDecodeError as e:
-                raise ValueError(f"JSON fragment invalid: {e}; fragment starts: {m.group(1)[:200]}")
-
-        # Nothing JSON-like
-        raise ValueError(f"Model did not return JSON. First 200 chars: {raw[:200]}")
-
-    # ----------------------------------------------------------------------
-    # Public task methods
-    # ----------------------------------------------------------------------
-    async def analyze_profile(
-        self, profile: Union[str, Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Analyze and canonicalize a resume profile.
-
-        Extracts structured information (skills, education, experience)
-        from raw text or JSON profile data.
-
-        Parameters
-        ----------
-        profile : str | dict
-            The user's resume or structured profile data.
-
-        Returns
-        -------
-        dict
-            Analysis result of the profile as a JSON-compatible dictionary.
-        """
-        system, user, schema = pb.analyze_profile(profile)
-        return await self._invoke_json(system, user, schema)
-
-    async def extract_keywords(self, jd: str) -> Dict[str, Any]:
-        """
-        Extract relevant keywords from a job description.
-
-        Parameters
-        ----------
-        jd : str
-            The job description text.
-
-        Returns
-        -------
-        dict
-            Keywords grouped by type (e.g., skills, qualifications).
-        """
-        system, user, schema = pb.extract_keywords(jd)
-        return await self._invoke_json(system, user, schema)
-
-    async def tailor_bullets(
-        self, profile: Dict[str, Any], jd: str, tone: str = "concise"
-    ) -> Dict[str, Any]:
-        """
-        Tailor resume bullet points to a specific job description.
-
-        Parameters
-        ----------
-        profile : dict
-            Canonicalized user profile data.
-        jd : str
-            Target job description.
-        tone : str, optional
-            Desired tone of the tailored bullets (default is "concise").
-
-        Returns
-        -------
-        dict
-            Tailored bullet points and rationale.
-        """
-        system, user, schema = pb.tailor_bullets(profile, jd, tone)
-        return await self._invoke_json(system, user, schema)
-
-    async def write_summary(
-        self, profile: Dict[str, Any], jd: Optional[str]
-    ) -> Dict[str, Any]:
-        """
-        Generate a professional summary for the resume.
-
-        Parameters
-        ----------
-        profile : dict
-            Canonicalized user profile data.
-        jd : Optional[str]
-            Target job description, if available.
-
-        Returns
-        -------
-        dict
-            Generated summary and supporting details.
-        """
-        system, user, schema = pb.write_summary(profile, jd)
-        return await self._invoke_json(system, user, schema)
-
-    async def write_cover_letter(
-        self,
-        profile: Dict[str, Any],
-        jd: str,
-        company: Optional[str],
-        role: Optional[str],
-    ) -> Dict[str, Any]:
-        """
-        Generate a customized cover letter.
-
-        Parameters
-        ----------
-        profile : dict
-            Canonicalized user profile data.
-        jd : str
-            Job description text.
-        company : Optional[str]
-            Target company name.
-        role : Optional[str]
-            Target role title.
-
-        Returns
-        -------
-        dict
-            Generated cover letter text and structure.
-        """
-        system, user, schema = pb.write_cover_letter(profile, jd, company, role)
-        return await self._invoke_json(system, user, schema)
-
-    async def ats_score(self, resume_text: str, jd: str) -> Dict[str, Any]:
-        """
-        Compute an ATS (Applicant Tracking System) compatibility score.
-
-        Parameters
-        ----------
-        resume_text : str
-            Raw resume text.
-        jd : str
-            Target job description.
-
-        Returns
-        -------
-        dict
-            Contains the computed ATS score, matching breakdown, and suggestions.
-        """
-        system, user, schema = pb.ats_score(resume_text, jd)
-        return await self._invoke_json(system, user, schema)
-
-    # --- NEW: simple freeform chat entrypoint ------------------------------
-    async def chat(
-        self,
-        prompt: str,
-        profile: Optional[Union[str, Dict[str, Any]]] = None,
-        system: Optional[str] = None,
-    ) -> str:
-        """
-        Lightweight chat method for ad-hoc prompts (used by /chat).
-        If a profile is provided, it’s injected as context.
-        """
-        ctx = ""
-        if isinstance(profile, dict):
-            import json as _json
-            ctx = f"\n\nUser profile (JSON):\n{_json.dumps(profile, ensure_ascii=False)}"
-        elif isinstance(profile, str) and profile.strip():
-            ctx = f"\n\nUser profile (text):\n{profile.strip()}"
-
-        system = system or (
-            "You are a resume-writing assistant. Be concise and helpful. "
-            "Return plain text; no markdown, no code fences."
-        )
-        user = f"{prompt.strip()}{ctx}"
-        return await self._ainvoke_text(system, user)
+    

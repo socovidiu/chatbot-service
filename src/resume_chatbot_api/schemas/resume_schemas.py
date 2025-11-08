@@ -2,92 +2,83 @@
 Resume Schemas
 ==============
 
-This module defines the Pydantic data models used for resume analysis,
-keyword extraction, tailoring, and ATS scoring.
+Pydantic models with rule-based validation:
+- Counts (e.g., 3–5, >=2)
+- Ranges (0–5, 0–100)
+- Required dict keys (e.g., keyword clusters: core/tools/soft)
+- Length limits (summary, cover letter)
+- Shape checks for nested dicts (section_scores, keyword_match)
 
-Each schema represents either a request or a response model for the
-`/resume` API routes, ensuring type safety and well-documented payloads
-for both developers and clients.
-
-These models are used in conjunction with the
-:class:`services.llm_operator.LLMOperator` class.
+These models pair cleanly with LangChain's `with_structured_output(...)`.
 """
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
-from typing import List, Optional, Dict
+from __future__ import annotations
+from pydantic import (
+    BaseModel,
+    Field,
+    ConfigDict,
+    model_validator,
+    field_validator,
+    conint,
+)
+from typing import List, Optional, Dict, Annotated
+
+# aliases to avoid pylance warnings
+Score100 = Annotated[int, Field(ge=0, le=100)]
+Score5   = Annotated[int, Field(ge=0, le=5)]
+
+# ----------------------------- Helpers -----------------------------
+
+def _dedup(seq: List[str]) -> List[str]:
+    seen = set()
+    out = []
+    for x in seq:
+        k = x.strip()
+        if k and k not in seen:
+            out.append(k)
+            seen.add(k)
+    return out
+
+def _require_keys(d: Dict, keys: List[str], name: str):
+    for k in keys:
+        if k not in d:
+            raise ValueError(f"{name}.{k} is required")
+        if not isinstance(d[k], list):
+            raise ValueError(f"{name}.{k} must be a list")
+
+def _between_len(v: List[str], lo: int, hi: int, label: str) -> List[str]:
+    if not (lo <= len(v) <= hi):
+        raise ValueError(f"{label} must contain {lo}–{hi} items")
+    return v
+
+def _min_len(v: List[str], lo: int, label: str) -> List[str]:
+    if len(v) < lo:
+        raise ValueError(f"{label} must contain at least {lo} items")
+    return v
 
 
-# ----------------------------------------------------------------------
-# Base Resume Data Structures
-# ----------------------------------------------------------------------
+# --------------------- Base Resume Data Structures ---------------------
+
 class ExperienceItem(BaseModel):
-    """
-    Representation of a single work experience entry.
-
-    Attributes
-    ----------
-    company : str
-        Name of the company or organization.
-    role : str
-        Job title or position held.
-    start : Optional[str]
-        Start date or year of the role.
-    end : Optional[str]
-        End date or year of the role.
-    bullets : List[str]
-        Key achievements or responsibilities in bullet form.
-    """
-
     company: str = Field(..., description="Name of the company or organization.")
     role: str = Field(..., description="Job title or position held.")
     start: Optional[str] = Field(None, description="Start date or year of the role.")
     end: Optional[str] = Field(None, description="End date or year of the role.")
     bullets: List[str] = Field(default_factory=list, description="Key bullets.")
 
+    @field_validator("bullets")
+    @classmethod
+    def _dedup_bullets(cls, v: List[str]) -> List[str]:
+        return _dedup(v)
+
 
 class EducationItem(BaseModel):
-    """
-    Representation of a single education entry.
-
-    Attributes
-    ----------
-    school : str
-        Name of the educational institution.
-    degree : Optional[str]
-        Degree obtained or pursued.
-    year : Optional[str]
-        Year of graduation or attendance.
-    """
-
     school: str = Field(..., description="Name of the school or institution.")
     degree: Optional[str] = Field(None, description="Degree obtained or pursued.")
     year: Optional[str] = Field(None, description="Year of graduation or attendance.")
 
 
 class CanonicalProfile(BaseModel):
-    """
-    Canonical structured resume representation.
-
-    This model standardizes parsed resume data into a consistent format
-    for use across AI tasks such as tailoring, summary generation,
-    and ATS scoring.
-
-    Attributes
-    ----------
-    name : Optional[str]
-        Candidate's full name.
-    title : Optional[str]
-        Professional or role title.
-    summary : Optional[str]
-        Short profile summary or professional overview.
-    skills : List[str]
-        List of core skills or competencies.
-    experience : List[ExperienceItem]
-        List of work experience items.
-    education : List[EducationItem]
-        List of educational qualifications.
-    """
-
     name: Optional[str] = Field(None, description="Candidate's name.")
     title: Optional[str] = Field(None, description="Professional or role title.")
     summary: Optional[str] = Field(None, description="Brief professional summary.")
@@ -95,110 +86,108 @@ class CanonicalProfile(BaseModel):
     experience: List[ExperienceItem] = Field(default_factory=list, description="List of experience items.")
     education: List[EducationItem] = Field(default_factory=list, description="List of education items.")
 
+    @field_validator("skills")
+    @classmethod
+    def _dedup_skills(cls, v: List[str]) -> List[str]:
+        return _dedup(v)
 
-# ----------------------------------------------------------------------
-# Analyze Profile
-# ----------------------------------------------------------------------
+
+# ----------------------------- Analyze -----------------------------
+
 class AnalyzeRequest(BaseModel):
-    """
-    Request model for analyzing and canonicalizing a resume profile.
-
-    Attributes
-    ----------
-    profile : str | dict
-        Raw resume text or structured JSON profile.
-    """
-
     model_config = ConfigDict(extra="forbid")
-    canonical: CanonicalProfile
+    resumedata: CanonicalProfile
+
+
+class SectionScores(BaseModel):
+    summary: Score5 
+    experience: Score5 
+    education: Score5 
+    skills: Score5 
 
 
 class AnalyzeResponse(BaseModel):
     """
-    Response model containing the standardized resume representation.
-
-    Attributes
-    ----------
-    canonical : CanonicalProfile
-        Canonicalized profile structure derived from the input.
+    Rules encoded:
+    - quality: 0–100 (start 50; +25 strong exp; +15 quantified impact; +10 breadth; subtract for missing sections)
+    - strengths: ≥2 items
+    - gaps: ≥2 items
+    - risks: can be empty; otherwise concrete timeline issues
+    - recommendations: 3–5 items
+    - section_scores: ints 0–5 for summary/experience/education/skills
+    - keyword_clusters: dict with core/tools/soft (lists)
+    - anomalies: list
     """
     model_config = ConfigDict(extra="allow")
 
-    quality: int = Field(0, ge=0, le=100, description="Overall resume quality score (0–100).")
-    strengths: List[str] = Field(default_factory=list, description="What is working well.")
-    gaps: List[str] = Field(default_factory=list, description="Missing skills/sections/content.")
-    risks: List[str] = Field(default_factory=list, description="Potential red flags (date gaps, job-hopping, etc.).")
-    recommendations: List[str] = Field(default_factory=list, description="Concrete, actionable improvements.")
-    section_scores: Dict[str, int] = Field(
-        default_factory=dict,
-        description="Per-section scores 0–5, e.g. {'summary':4,'experience':3,'education':5,'skills':4}",
-    )
+    quality: Score100 = Field(..., description="Overall resume quality (0–100).")
+    strengths: List[str] = Field(default_factory=list, description="Concrete strengths (≥2).")
+    gaps: List[str] = Field(default_factory=list, description="Concrete gaps (≥2).")
+    risks: List[str] = Field(default_factory=list, description="Timeline risks (can be []).")
+    recommendations: List[str] = Field(default_factory=list, description="3–5 actionable next steps.")
+    section_scores: SectionScores = Field(..., description="Per-section scores 0–5.")
     keyword_clusters: Dict[str, List[str]] = Field(
         default_factory=dict,
-        description="Clustered keywords, e.g. {'core':[],'tools':[],'soft':[]}",
+        description="{'core':[], 'tools':[], 'soft':[]}",
     )
-    anomalies: List[str] = Field(default_factory=list, description="Parsing/timeline anomalies to check.")
+    anomalies: List[str] = Field(default_factory=list, description="Inconsistencies, overlaps, etc.")
+
+    # list constraints & dedupe
+    @field_validator("strengths", "gaps", "risks", "recommendations", "anomalies")
+    @classmethod
+    def _dedup_lists(cls, v: List[str]) -> List[str]:
+        return _dedup(v)
+
+    @field_validator("strengths")
+    @classmethod
+    def _min_strengths(cls, v: List[str]) -> List[str]:
+        return _min_len(v, 2, "strengths")
+
+    @field_validator("gaps")
+    @classmethod
+    def _min_gaps(cls, v: List[str]) -> List[str]:
+        return _min_len(v, 2, "gaps")
+
+    @field_validator("recommendations")
+    @classmethod
+    def _recs_3_5(cls, v: List[str]) -> List[str]:
+        return _between_len(v, 3, 5, "recommendations")
+
+    @field_validator("keyword_clusters")
+    @classmethod
+    def _clusters_shape(cls, v: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        _require_keys(v, ["core", "tools", "soft"], "keyword_clusters")
+        v["core"] = _dedup(v["core"])
+        v["tools"] = _dedup(v["tools"])
+        v["soft"] = _dedup(v["soft"])
+        return v
 
 
-# ----------------------------------------------------------------------
-# Job Description and Keyword Extraction
-# ----------------------------------------------------------------------
+# ----------------------------- Keywords -----------------------------
+
 class JDRequest(BaseModel):
-    """
-    Request model for keyword extraction from a job description.
-
-    Attributes
-    ----------
-    job_description : str
-        The raw job description text.
-    """
     model_config = ConfigDict(extra="forbid")
     job_description: str = Field(..., description="Text of the job description.")
 
 
 class KeywordsResponse(BaseModel):
-    """
-    Response model containing extracted job-relevant keywords.
-
-    Attributes
-    ----------
-    skills : List[str]
-        Extracted hard or technical skills.
-    keywords : List[str]
-        General keywords from the job posting.
-    seniority : Optional[str]
-        Seniority level inferred from the job description.
-    nice_to_have : List[str]
-        Optional or secondary skills mentioned in the posting.
-    """
-
     model_config = ConfigDict(extra="allow")
 
     skills: List[str] = Field(default_factory=list, description="List of core technical skills.")
-    keywords: List[str] = Field(default_factory=list, description="List of general keywords extracted.")
-    seniority: Optional[str] = Field(None, description="Seniority level inferred from the description.")
+    keywords: List[str] = Field(default_factory=list, description="General keywords extracted.")
+    seniority: Optional[str] = Field(None, description="Inferred seniority (optional).")
     nice_to_have: List[str] = Field(default_factory=list, description="Optional or nice-to-have skills.")
 
+    @field_validator("skills", "keywords", "nice_to_have")
+    @classmethod
+    def _dedup_lists(cls, v: List[str]) -> List[str]:
+        return _dedup(v)
 
-# ----------------------------------------------------------------------
-# Tailoring and Summary
-# ----------------------------------------------------------------------
+
+# ----------------------------- Tailoring -----------------------------
+
 class TailorRequest(BaseModel):
-    """
-    Request model for tailoring resume bullet points.
-
-    Attributes
-    ----------
-    profile : CanonicalProfile | dict
-        User's canonical or raw profile data.
-    job_description : str
-        Target job description for tailoring.
-    tone : Optional[str]
-        Desired tone for suggestions (default: 'concise').
-    """
-
     model_config = ConfigDict(extra="forbid")
-
     profile: CanonicalProfile = Field(..., description="Canonical profile data.")
     job_description: str = Field(..., description="Target job description text.")
     tone: Optional[str] = Field("concise", description="Desired tone for tailored suggestions.")
@@ -206,79 +195,70 @@ class TailorRequest(BaseModel):
 
 class TailorResponse(BaseModel):
     """
-    Response model containing tailored bullet points and focus areas.
-
-    Attributes
-    ----------
-    bullets : List[str]
-        Tailored bullet points aligned with the job description.
-    removed : List[str]
-        Bullets that were removed or de-emphasized.
-    focus : List[str]
-        Key focus areas recommended for improvement.
+    Rules encoded:
+    - bullets: 4–6; action-oriented; scope + tech + measurable impact
+    - focus: 3–5 priority keywords to emphasize
+    - removed: 2–4 to de-emphasize for THIS role
     """
-
     model_config = ConfigDict(extra="allow")
 
-    bullets: List[str] = Field(default_factory=list, description="Tailored bullet points.")
-    removed: List[str] = Field(default_factory=list, description="Removed or less relevant bullets.")
-    focus: List[str] = Field(default_factory=list, description="Suggested focus areas.")
+    bullets: List[str] = Field(default_factory=list, description="Tailored bullet points (4–6).")
+    removed: List[str] = Field(default_factory=list, description="Items to de-emphasize (2–4).")
+    focus: List[str] = Field(default_factory=list, description="Priority keywords (3–5).")
 
+    @field_validator("bullets", "removed", "focus")
+    @classmethod
+    def _dedup_lists(cls, v: List[str]) -> List[str]:
+        return _dedup(v)
+
+    @field_validator("bullets")
+    @classmethod
+    def _bullets_4_6(cls, v: List[str]) -> List[str]:
+        return _between_len(v, 4, 6, "bullets")
+
+    @field_validator("focus")
+    @classmethod
+    def _focus_3_5(cls, v: List[str]) -> List[str]:
+        return _between_len(v, 3, 5, "focus")
+
+    @field_validator("removed")
+    @classmethod
+    def _removed_2_4(cls, v: List[str]) -> List[str]:
+        return _between_len(v, 2, 4, "removed")
+
+
+# ----------------------------- Summary -----------------------------
 
 class SummaryRequest(BaseModel):
-    """
-    Request model for generating a professional summary.
-
-    Attributes
-    ----------
-    profile : CanonicalProfile | dict
-        User's profile or canonical resume data.
-    job_description : Optional[str]
-        Target job description for contextualization.
-    """
-
     model_config = ConfigDict(extra="forbid")
-
     profile: CanonicalProfile = Field(..., description="Canonical profile data.")
-    job_description: Optional[str] = Field(None, description="Optional target job description.")
+    job_description: Optional[str] = Field(None, description="Optional target JD.")
 
 
 class SummaryResponse(BaseModel):
     """
-    Response model containing a generated professional summary.
-
-    Attributes
-    ----------
-    summary : str
-        The AI-generated resume summary text.
+    Rules encoded:
+    - 2–3 lines, concise; enforce via length limits (approx)
     """
-
     model_config = ConfigDict(extra="allow")
-
     summary: str = Field("", description="Generated professional summary.")
 
+    @field_validator("summary")
+    @classmethod
+    def _non_empty_and_short(cls, v: str) -> str:
+        text = v.strip()
+        if not text:
+            raise ValueError("summary must not be empty")
+        # soft length cap ~320 chars (~2–3 lines)
+        if len(text) > 320:
+            raise ValueError("summary should be concise (≤ ~320 characters)")
+        return text
 
-# ----------------------------------------------------------------------
-# Cover Letter Generation
-# ----------------------------------------------------------------------
+
+# --------------------------- Cover Letter ---------------------------
+
 class CoverLetterRequest(BaseModel):
-    """
-    Request model for generating a tailored cover letter.
-
-    Attributes
-    ----------
-    profile : CanonicalProfile | dict
-        Canonicalized or raw resume profile data.
-    job_description : str
-        Job description to tailor the letter for.
-    company : Optional[str]
-        Target company name.
-    role : Optional[str]
-        Target role or job title.
-    """
-
     model_config = ConfigDict(extra="forbid")
-
     profile: CanonicalProfile = Field(..., description="Canonical profile data.")
     job_description: str = Field(..., description="Job description text.")
     company: Optional[str] = Field(None, description="Target company name.")
@@ -287,34 +267,27 @@ class CoverLetterRequest(BaseModel):
 
 class CoverLetterResponse(BaseModel):
     """
-    Response model containing the generated cover letter text.
-
-    Attributes
-    ----------
-    cover_letter : str
-        The AI-generated cover letter text.
+    Rules encoded:
+    - ≤ 180 words, specific; no fluff
     """
-
     model_config = ConfigDict(extra="allow")
-
     cover_letter: str = Field("", description="Generated cover letter text.")
 
-# ----------------------------------------------------------------------
-# ATS Scoring
-# ----------------------------------------------------------------------
+    @field_validator("cover_letter")
+    @classmethod
+    def _limit_180_words(cls, v: str) -> str:
+        text = v.strip()
+        if not text:
+            raise ValueError("cover_letter must not be empty")
+        if len(text.split()) > 180:
+            raise ValueError("cover_letter must be ≤ 180 words")
+        return text
+
+
+# ----------------------------- ATS Score -----------------------------
+
 class ATSScoreRequest(BaseModel):
-    """
-    Request model for ATS (Applicant Tracking System) scoring.
-
-    Attributes
-    ----------
-    resume_text : str
-        The raw resume text to evaluate.
-    job_description : str
-        Target job description for comparison.
-    """
     model_config = ConfigDict(extra="forbid")
-
     resume_text: Optional[str] = Field(None, description="Raw resume text.")
     canonical: Optional[CanonicalProfile] = Field(None, description="Canonical profile.")
     job_description: str = Field(..., description="Target job description text.")
@@ -328,23 +301,36 @@ class ATSScoreRequest(BaseModel):
 
 class ATSScoreResponse(BaseModel):
     """
-    Response model for ATS scoring results.
-
-    Attributes
-    ----------
-    score : int
-        Computed ATS compatibility score (0–100).
-    gaps : List[str]
-        Missing or weak areas detected in the resume.
-    recommendations : List[str]
-        Suggestions to improve the score.
-    keyword_match : Dict[str, List[str]]
-        Mapping of matched and unmatched keywords by category.
+    Rules encoded:
+    - score: 0–100
+    - gaps: list
+    - recommendations: ≥3 items (actionable)
+    - keyword_match: dict with 'present' and 'missing' (lists)
     """
-
     model_config = ConfigDict(extra="allow")
 
-    score: int = Field(0, description="ATS score between 0 and 100.")
+    score: Score100 = Field(0, description="ATS score (0–100).")
     gaps: List[str] = Field(default_factory=list, description="Missing or weak skills/sections.")
-    recommendations: List[str] = Field(default_factory=list, description="Improvement recommendations.")
-    keyword_match: Dict[str, List[str]] = Field(default_factory=dict, description="Matched/unmatched keyword mapping.")
+    recommendations: List[str] = Field(default_factory=list, description="Actionable recommendations (≥3).")
+    keyword_match: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="{'present':[], 'missing':[]}",
+    )
+
+    @field_validator("gaps", "recommendations")
+    @classmethod
+    def _dedup_lists(cls, v: List[str]) -> List[str]:
+        return _dedup(v)
+
+    @field_validator("recommendations")
+    @classmethod
+    def _recs_min3(cls, v: List[str]) -> List[str]:
+        return _min_len(v, 3, "recommendations")
+
+    @field_validator("keyword_match")
+    @classmethod
+    def _km_shape(cls, v: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        _require_keys(v, ["present", "missing"], "keyword_match")
+        v["present"] = _dedup(v["present"])
+        v["missing"] = _dedup(v["missing"])
+        return v

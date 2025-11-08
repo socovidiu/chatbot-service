@@ -1,4 +1,4 @@
-from resume_chatbot_api.services import prompt_builders as pb
+from resume_chatbot_api.services import prompts as pb
 
 def test_analyze_profile_builder():
     system, user, schema = pb.analyze_profile({"name": "Ada"})

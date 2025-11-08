@@ -27,7 +27,8 @@ The OpenAPI/Swagger UI is available at:
 """
 
 from fastapi import FastAPI
-from api import chat, resume
+from api import resume
+from core.config import settings
 from core.config import settings
 
 # ----------------------------------------------------------------------
@@ -43,7 +44,6 @@ app = FastAPI(
 # ----------------------------------------------------------------------
 # Router Registration
 # ----------------------------------------------------------------------
-app.include_router(chat.router, prefix="/chat", tags=["chat"])
 app.include_router(resume.router, tags=["resume"])
 
 
