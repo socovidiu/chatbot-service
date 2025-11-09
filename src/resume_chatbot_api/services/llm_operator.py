@@ -21,6 +21,8 @@ from typing import Any, List, Callable, Type
 from langchain.agents import create_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chat_models import init_chat_model
+# from langchain_openai import ChatOpenAI
+# from langchain_ollama import ChatOllama
 from core.config import settings
 
 
@@ -59,6 +61,26 @@ class LLMOperator:
                 **common,
             )
 
+    # def create_chat_llm(self):
+    #     if settings.langchain_provider == "ollama":
+    #         return ChatOllama(
+    #             model=settings.ollama_model,
+    #             base_url=settings.ollama_base_url,
+    #             temperature=settings.llm_temperature,
+    #             # LangChain ChatOllama supports max_tokens via num_predict internally
+    #             num_predict=settings.llm_max_tokens,
+    #         )
+    #     elif self.provider == "openai":
+    #         return ChatOpenAI(
+    #             model=settings.openai_model,
+    #             temperature=settings.llm_temperature,
+    #             max_tokens=settings.llm_max_tokens,
+    #             # The response_format below tells GPT-4o to emit valid JSON
+    #             model_kwargs={"response_format": {"type": "json_object"}},
+    #             api_key=settings.openai_api_key,
+    #         )
+    #     else:
+    #         raise ValueError(f"Unsupported provider: {self.provider}")
         
     # ---------- Chains (no tools, no memory, no recursion risk) ----------
     def create_chain(self, system_prompt: str, schema: Type[Any]):
