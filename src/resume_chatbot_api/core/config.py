@@ -1,8 +1,7 @@
 # core/config.py
 from __future__ import annotations
-import json
-from typing import Optional, List, Literal
-from pydantic import Field, field_validator
+from typing import Optional, Literal
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Provider = Literal["openai", "ollama"]

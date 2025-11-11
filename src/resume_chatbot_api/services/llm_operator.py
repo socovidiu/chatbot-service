@@ -22,7 +22,7 @@ from langchain.agents import create_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser, PydanticOutputParser
 from langchain.chat_models import init_chat_model
-from core.config import settings
+from resume_chatbot_api.core.config import settings
 
 
 class LLMOperator:

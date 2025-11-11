@@ -3,7 +3,7 @@ from fastapi.security import APIKeyHeader
 from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 from typing import Optional
 
-from core.config import settings
+from resume_chatbot_api.core.config import settings
 
 # Build the header extractor dynamically from config
 _api_key_header = APIKeyHeader(name=settings.api_key_header, auto_error=False)

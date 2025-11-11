@@ -27,10 +27,9 @@ The OpenAPI/Swagger UI is available at:
 """
 
 from fastapi import FastAPI, Security
-from api import resume
-from core.config import settings
-from core.config import settings
-from core.security import require_api_key
+from resume_chatbot_api.api import resume
+from resume_chatbot_api.core.config import settings
+from resume_chatbot_api.core.security import require_api_key
 # ----------------------------------------------------------------------
 # FastAPI Application Initialization
 # ----------------------------------------------------------------------

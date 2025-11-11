@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: "lint + tests (py313)"
+            python-version: "3.13"
+            run-lint: true
+            run-tests: true
+
+    name: ${{ matrix.name }}
+    env:
+      PYTHONPATH: src
+      LANGCHAIN_PROVIDER: ollama
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Sync dependencies (dev)
+        run: uv sync --dev
+
+      - name: Ruff check
+        if: ${{ matrix.run-lint == 'true' }}
+        run: uv run ruff check src --output-format=github
+
+      - name: Run tests
+        if: ${{ matrix.run-tests == 'true' }}
+        run: uv run pytest -v --maxfail=1 --cov=resume_chatbot_api --cov-report=term-missing
