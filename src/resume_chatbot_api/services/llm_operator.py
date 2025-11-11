@@ -20,9 +20,8 @@ from __future__ import annotations
 from typing import Any, List, Callable, Type
 from langchain.agents import create_agent
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser, PydanticOutputParser
 from langchain.chat_models import init_chat_model
-# from langchain_openai import ChatOpenAI
-# from langchain_ollama import ChatOllama
 from core.config import settings
 
 
@@ -36,13 +35,7 @@ class LLMOperator:
         self.model = self._init_chat_model()
 
     def _init_chat_model(self):
-        # Common kwargs
-        common = {}
-        if settings.llm_temperature is not None:
-            common["temperature"] = settings.llm_temperature
-        if settings.llm_max_tokens is not None:
-            common["max_tokens"] = settings.llm_max_tokens
-
+        
         if settings.langchain_provider == "openai":
             # Requires: pip install -U langchain langchain-openai
             # api_key can also come from env; passing is fine too
@@ -50,7 +43,7 @@ class LLMOperator:
                 settings.openai_model,
                 model_provider="openai",
                 api_key=settings.openai_api_key,
-                **common,
+                temperature=settings.llm_temperature,
             )
         else:  # ollama
             # Requires: pip install -U langchain langchain-ollama
@@ -58,50 +51,33 @@ class LLMOperator:
                 settings.ollama_model,
                 model_provider="ollama",
                 base_url=settings.ollama_base_url,
-                **common,
+                temperature=settings.llm_temperature,
             )
 
-    # def create_chat_llm(self):
-    #     if settings.langchain_provider == "ollama":
-    #         return ChatOllama(
-    #             model=settings.ollama_model,
-    #             base_url=settings.ollama_base_url,
-    #             temperature=settings.llm_temperature,
-    #             # LangChain ChatOllama supports max_tokens via num_predict internally
-    #             num_predict=settings.llm_max_tokens,
-    #         )
-    #     elif self.provider == "openai":
-    #         return ChatOpenAI(
-    #             model=settings.openai_model,
-    #             temperature=settings.llm_temperature,
-    #             max_tokens=settings.llm_max_tokens,
-    #             # The response_format below tells GPT-4o to emit valid JSON
-    #             model_kwargs={"response_format": {"type": "json_object"}},
-    #             api_key=settings.openai_api_key,
-    #         )
-    #     else:
-    #         raise ValueError(f"Unsupported provider: {self.provider}")
-        
-    # ---------- Chains (no tools, no memory, no recursion risk) ----------
+
+    # ---------- Chains (most common) ----------
     def create_chain(self, system_prompt: str, schema: Type[Any]):
         """
-        Returns a Runnable chain: { 'user': <text> } -> Pydantic output.
-        Prefer this for endpoints that don't need tools.
+        Returns a LangChain chat chain with standardized prompt and output parsing.
         """
         prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
+            ("system", system_prompt),      
             ("user", "{user}"),
         ])
 
-        # Newer LangChain builds: model.with_structured_output(...)
+         # Prefer native structured output if available
         with_structured = getattr(self.model, "with_structured_output", None)
         if callable(with_structured):
-            structured_model = self.model.with_structured_output(schema)
-            return prompt | structured_model
-
-        # Fallback: some builds accept response_format on the model
-        return prompt | self.model.bind(response_format=schema)
-
+            structured = self.model.with_structured_output(schema)  # returns a new Runnable
+            chain = prompt | structured  # already returns a dict matching the schema
+        else:
+            # Fallback: force JSON and parse with Pydantic
+            parser = PydanticOutputParser(pydantic_object=schema)
+            json_mode = self.model.bind(response_format={"type": "json_object"})  # new Runnable
+            chain = prompt | json_mode | StrOutputParser() | parser
+            
+        return chain
+    
     # ---------- Agents (only when you need tools) ----------
     def create_agent(self, tools: List[Callable], system_prompt: str, schema: Type[Any]):
         """

@@ -53,7 +53,10 @@ ats_chain = llm.create_chain(SYSTEM_ATS, ATSScoreResponse)
 async def analyze(req: AnalyzeRequest):
     try:
         msg = build_analyze_user(req)
-        return await analyze_chain.ainvoke({"user": msg})
+        raw = await analyze_chain.ainvoke({"user": msg})
+        # raw may be dict or LC Message; normalize then validate:
+        data = raw if isinstance(raw, dict) else getattr(raw, "content", raw)
+        return AnalyzeResponse.model_validate(data)  # <- enforces schema
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"analyze failed: {e}")
 

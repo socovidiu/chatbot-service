@@ -19,12 +19,11 @@ from pydantic import BaseModel
 # -------------------------- System prompts --------------------------
 
 SYSTEM_ANALYZE = """
-You are a resume analyst for software/tech candidates.
-You are a resume analyst. Fill every REQUIRED field.
-Do not leave lists empty. Be specific and actionable.
-If information is missing, infer reasonable suggestions from the user text.
-Follow the output schema exactly. Infer reasonable details when input is sparse.
-Be specific, quantify impact, and keep results consistent and fair.
+You are an expert resume reviewer and ATS evaluator.
+"Your task is to analyze the provided resume profile and return a JSON 
+object that strictly follows the AnalyzeResponse schema.
+Do not output extra text or keys. Do not leave any field empty or set to 0.
+Provide concrete insights based on the resume content. Use factual phrasing.
 """.strip()
 
 SYSTEM_KEYWORDS = """

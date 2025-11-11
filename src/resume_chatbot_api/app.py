@@ -26,11 +26,11 @@ The OpenAPI/Swagger UI is available at:
     http://localhost:8000/docs
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Security
 from api import resume
 from core.config import settings
 from core.config import settings
-
+from core.security import require_api_key
 # ----------------------------------------------------------------------
 # FastAPI Application Initialization
 # ----------------------------------------------------------------------
@@ -38,6 +38,7 @@ app = FastAPI(
     title=settings.API_TITLE,
     description=settings.API_DESCRIPTION,
     version=settings.API_VERSION,
+    dependencies=[Security(require_api_key)]
 )
 
 

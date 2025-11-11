@@ -19,7 +19,6 @@ from pydantic import (
     ConfigDict,
     model_validator,
     field_validator,
-    conint,
 )
 from typing import List, Optional, Dict, Annotated
 
@@ -96,7 +95,7 @@ class CanonicalProfile(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    resumedata: CanonicalProfile
+    profile: CanonicalProfile
 
 
 class SectionScores(BaseModel):
@@ -118,7 +117,7 @@ class AnalyzeResponse(BaseModel):
     - keyword_clusters: dict with core/tools/soft (lists)
     - anomalies: list
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     quality: Score100 = Field(..., description="Overall resume quality (0–100).")
     strengths: List[str] = Field(default_factory=list, description="Concrete strengths (≥2).")
@@ -171,7 +170,7 @@ class JDRequest(BaseModel):
 
 
 class KeywordsResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     skills: List[str] = Field(default_factory=list, description="List of core technical skills.")
     keywords: List[str] = Field(default_factory=list, description="General keywords extracted.")
@@ -200,7 +199,7 @@ class TailorResponse(BaseModel):
     - focus: 3–5 priority keywords to emphasize
     - removed: 2–4 to de-emphasize for THIS role
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     bullets: List[str] = Field(default_factory=list, description="Tailored bullet points (4–6).")
     removed: List[str] = Field(default_factory=list, description="Items to de-emphasize (2–4).")
@@ -240,7 +239,7 @@ class SummaryResponse(BaseModel):
     Rules encoded:
     - 2–3 lines, concise; enforce via length limits (approx)
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     summary: str = Field("", description="Generated professional summary.")
 
     @field_validator("summary")
@@ -270,7 +269,7 @@ class CoverLetterResponse(BaseModel):
     Rules encoded:
     - ≤ 180 words, specific; no fluff
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
     cover_letter: str = Field("", description="Generated cover letter text.")
 
     @field_validator("cover_letter")
@@ -307,7 +306,7 @@ class ATSScoreResponse(BaseModel):
     - recommendations: ≥3 items (actionable)
     - keyword_match: dict with 'present' and 'missing' (lists)
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     score: Score100 = Field(0, description="ATS score (0–100).")
     gaps: List[str] = Field(default_factory=list, description="Missing or weak skills/sections.")

@@ -23,7 +23,6 @@ class Settings(BaseSettings):
 
     # ---- Shared LLM params ----
     llm_temperature: float = Field(0.0, env="LLM_TEMPERATURE")
-    llm_max_tokens: Optional[int] = Field(None, env="LLM_MAX_TOKENS")
 
     # ---- Ollama ----
     ollama_model: str = Field("llama3.2", env=("OLLAMA_MODEL", "LLM_MODEL"))
@@ -36,25 +35,20 @@ class Settings(BaseSettings):
     API_DESCRIPTION: str = Field("An API for interacting with a resume chatbot powered by LLMs.", env="API_DESCRIPTION")
     # ---- API key auth ----
     api_key_header: str = Field("X-API-Key", env="API_KEY_HEADER")
-    api_keys: List[str] = Field(default_factory=list, env="API_KEYS")
+    api_key: str = Field(None, env="API_KEY")
 
-    @field_validator("api_keys", mode="before")
-    @classmethod
-    def parse_api_keys(cls, v):
-        if not v:
-            return []
-        if isinstance(v, list):
-            return v
-        s = str(v).strip()
-        # JSON list?
-        if s.startswith("["):
-            try:
-                parsed = json.loads(s)
-                return [str(x) for x in parsed]
-            except Exception:
-                pass
-        # Comma-separated
-        return [seg.strip() for seg in s.split(",") if seg.strip()]
+    @property
+    # def api_keys(self) -> list[str]:
+    #     s = (self.api_keys_raw or "").strip()
+    #     if not s:
+    #         return []
+    #     if s.startswith("["):
+    #         try:
+    #             import json
+    #             return [str(x) for x in json.loads(s)]
+    #         except Exception:
+    #             pass
+    #     return [seg.strip() for seg in s.split(",") if seg.strip()]
 
     # ---- Helpers ----
     @property
