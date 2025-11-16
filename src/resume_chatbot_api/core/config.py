@@ -1,10 +1,21 @@
 # core/config.py
-from __future__ import annotations
+import os
+from pathlib import Path
 from typing import Optional, Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Provider = Literal["openai", "ollama"]
+
+def load_secret(name: str, default: str | None = None) -> str | None:
+    """If NAME_FILE is set, read secret from that file, else use NAME env var."""
+    file_var = os.getenv(f"{name}_FILE")
+    if file_var:
+        path = Path(file_var)
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+
+    return os.getenv(name, default)
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -18,7 +29,7 @@ class Settings(BaseSettings):
 
     # ---- OpenAI ----
     openai_model: str = Field("gpt-4o-mini", env=("OPENAI_MODEL", "LLM_MODEL"))
-    openai_api_key: Optional[str] = Field(None, env=("OPENAI_API_KEY", "LLM_API_KEY"))
+    openai_api_key: Optional[str] = Field(default_factory=lambda: load_secret("OPENAI_API_KEY", ""))
 
     # ---- Shared LLM params ----
     llm_temperature: float = Field(0.0, env="LLM_TEMPERATURE")
@@ -34,7 +45,7 @@ class Settings(BaseSettings):
     API_DESCRIPTION: str = Field("An API for interacting with a resume chatbot powered by LLMs.", env="API_DESCRIPTION")
     # ---- API key auth ----
     api_key_header: str = Field("X-API-Key", env="API_KEY_HEADER")
-    api_key: str = Field(None, env="API_KEY")
+    api_key: str = Field(default_factory=lambda: load_secret("INTERNAL_API_KEY_FOR_DOTNET", ""))
 
     @property
     # def api_keys(self) -> list[str]:
