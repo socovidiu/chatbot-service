@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     API_DESCRIPTION: str = Field("An API for interacting with a resume chatbot powered by LLMs.", env="API_DESCRIPTION")
     # ---- API key auth ----
     api_key_header: str = Field("X-API-Key", env="API_KEY_HEADER")
-    api_key: str = Field(default_factory=lambda: load_secret("INTERNAL_API_KEY_FOR_DOTNET", ""))
+    api_key: str = Field(default_factory=lambda: load_secret("INTERNAL_API_KEY", ""))
 
     @property
     # def api_keys(self) -> list[str]:

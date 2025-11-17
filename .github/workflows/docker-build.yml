@@ -1,0 +1,50 @@
+name: Docker - Build Chatbot Service Image
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Dockerfile"
+      - ".github/workflows/docker-build.yml"
+
+concurrency:
+  group: chatbot-docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+
+    env:
+      # Dummy envs if your Docker build expects them at build time
+      OPENAI_API_KEY: "build-time-dummy-key"
+      LLM_API_KEY: "build-time-dummy-llm-key"
+      LANGCHAIN_PROVIDER: "ollama"
+      OLLAMA_BASE_URL: "http://localhost:11434"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Quick sanity check that deps resolve
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync dependencies (no-dev)
+        run: uv sync
+
+      # ----- Docker build only (no push yet) -----
+      - name: Build Docker image
+        run: |
+          IMAGE_NAME=chatbot-service
+          IMAGE_TAG=${{ github.sha }}
+          docker build -t $IMAGE_NAME:$IMAGE_TAG .
+          echo "Built image: $IMAGE_NAME:$IMAGE_TAG"

@@ -20,7 +20,10 @@ jobs:
     env:
       PYTHONPATH: src
       LANGCHAIN_PROVIDER: ollama
-
+      OPENAI_API_KEY: "test-openai-key"
+      LLM_API_KEY: "test-internal-api-key"
+      OLLAMA_BASE_URL: "http://localhost:11434"
+      
     steps:
       - uses: actions/checkout@v4
 
