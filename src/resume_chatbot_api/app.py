@@ -37,15 +37,25 @@ app = FastAPI(
     title=settings.API_TITLE,
     description=settings.API_DESCRIPTION,
     version=settings.API_VERSION,
-    dependencies=[Security(require_api_key)]
 )
 
 
 # ----------------------------------------------------------------------
 # Router Registration
 # ----------------------------------------------------------------------
-app.include_router(resume.router, tags=["resume"])
+app.include_router(
+    resume.router,
+    tags=["resume"],
+    dependencies=[Security(require_api_key)],
+)
 
+
+# ----------------------------------------------------------------------
+# Health Check Endpoint (no authentication)
+# ----------------------------------------------------------------------
+@app.get("/health", include_in_schema=False)
+def health_check():
+    return {"status": "ok"}
 
 # ----------------------------------------------------------------------
 # Root Endpoint

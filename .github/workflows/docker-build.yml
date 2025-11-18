@@ -14,6 +14,16 @@ concurrency:
   group: chatbot-docker-build-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  id-token: write   
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ secrets.GCP_REGION }}
+  REPOSITORY: "llm-service"        
+  IMAGE_NAME: "llm-service"        
+
 jobs:
   docker-build:
     runs-on: ubuntu-latest
@@ -41,10 +51,52 @@ jobs:
       - name: Sync dependencies (no-dev)
         run: uv sync
 
-      # ----- Docker build only (no push yet) -----
+      # Authenticate to GCP via Workload Identity Federation
+      - name: Auth to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_ID_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      # Configure Docker for Artifact Registry
+      - name: Configure Docker auth for Artifact Registry
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      # Build image with full Artifact Registry URI
       - name: Build Docker image
         run: |
-          IMAGE_NAME=chatbot-service
-          IMAGE_TAG=${{ github.sha }}
-          docker build -t $IMAGE_NAME:$IMAGE_TAG .
-          echo "Built image: $IMAGE_NAME:$IMAGE_TAG"
+          IMAGE_URI_SHA="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          IMAGE_URI_LATEST="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${IMAGE_NAME}:latest"
+
+          echo "IMAGE_URI_SHA=${IMAGE_URI_SHA}" >> $GITHUB_ENV
+          echo "IMAGE_URI_LATEST=${IMAGE_URI_LATEST}" >> $GITHUB_ENV
+
+          docker build -t "${IMAGE_URI_SHA}" .
+          docker tag "${IMAGE_URI_SHA}" "${IMAGE_URI_LATEST}"
+          echo "Built images:"
+          echo "  ${IMAGE_URI_SHA}"
+          echo "  ${IMAGE_URI_LATEST}"
+
+      - name: Push Docker image
+        run: |
+          docker push "${IMAGE_URI_SHA}"
+          docker push "${IMAGE_URI_LATEST}"
+          echo "Pushed images:"
+          echo "  ${IMAGE_URI_SHA}"
+          echo "  ${IMAGE_URI_LATEST}"
+
+      # Tell infra repo to deploy this SHA
+      - name: Trigger deploy in infra repo
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          repository: socovidiu/resume-builder-k8s   
+          event-type: deploy-llm-service
+          client-payload: |
+            { "image_tag": "${GITHUB_SHA}" }
