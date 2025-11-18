@@ -96,7 +96,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.INFRA_REPO_TOKEN }}
-          repository: socovidiu/resume-builder-k8s   
+          repository: socdevops-resume/resume-builder-k8s   
           event-type: deploy-llm-service
           client-payload: |
             { "image_tag": "${GITHUB_SHA}" }
